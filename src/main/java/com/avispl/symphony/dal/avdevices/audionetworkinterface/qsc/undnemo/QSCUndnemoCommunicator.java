@@ -1,14 +1,15 @@
 /*
- * Copyright (c) 2021 AVI-SPL Inc. All Rights Reserved.
+ * Copyright (c) 2022 AVI-SPL Inc. All Rights Reserved.
  */
 package com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo;
 
 import java.util.List;
 
-import jdk.internal.net.http.common.SSLFlowDelegate.Monitorable;
 
 import com.avispl.symphony.api.dal.control.Controller;
 import com.avispl.symphony.api.dal.dto.control.ControllableProperty;
+import com.avispl.symphony.api.dal.dto.monitor.Statistics;
+import com.avispl.symphony.api.dal.monitor.Monitorable;
 
 /**
  * QSC Attero Tech unDNEMO Adapter
@@ -38,9 +39,9 @@ import com.avispl.symphony.api.dal.dto.control.ControllableProperty;
  * @since 1.0
  */
 public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorable, Controller {
+
 	@Override
-	public String getInfo() {
-		UDPCommunicator udpCommunicator = new UDPCommunicator();
+	public List<Statistics> getMultipleStatistics() throws Exception {
 		return null;
 	}
 
