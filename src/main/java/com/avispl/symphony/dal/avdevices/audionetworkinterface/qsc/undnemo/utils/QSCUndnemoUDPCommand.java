@@ -18,7 +18,12 @@ public enum QSCUndnemoUDPCommand {
 	GET_CMD_SPKR_MUTE("SPKR_MUTE"),
 	GET_CMD_VOLUME("VOLUME"),
 	GET_CMD_GBB("GBB"),
-	GET_CMD_GDB("GDB");
+	GET_CMD_GDB("GDB"),
+	SET_ACT_CH_IDX("SET_ACT_CH_IDX"),
+	SET_SBB("SBB"),
+	SET_SDB("SDB"),
+	SET_SPKR_MUTE("SET_SPKR_MUTE"),
+	SET_VOLUME("SET_VOLUME");
 
 	private final String command;
 

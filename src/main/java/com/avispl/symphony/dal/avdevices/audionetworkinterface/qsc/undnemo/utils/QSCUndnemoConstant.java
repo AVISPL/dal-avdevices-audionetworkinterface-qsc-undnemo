@@ -15,6 +15,8 @@ public class QSCUndnemoConstant {
 	public static final String QUOTE = "\"";
 	public static final String CR = "\r";
 	public static final String ACTIVE_CHANNEL = "ActiveChannel";
+	public static final String EMPTY = "";
 	public static final String OPEN_PAREN = "(";
 	public static final String CLOSE_PAREN = ")";
+	public static final String HASH = "#";
 }

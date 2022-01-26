@@ -53,14 +53,14 @@ import com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.utils
  */
 public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorable, Controller {
 
-	public static final String EMPTY = "";
+	private ExtendedStatistics localExtendedStatistics;
 
 	/**
 	 * Constructor set command error and success list that is required by {@link UDPCommunicator}
 	 */
 	public QSCUndnemoCommunicator() {
 		// set buffer length because the response may exceed the default value.
-		this.setBufferLength(50);
+		this.setBufferLength(100);
 		this.setCommandSuccessList(Collections.singletonList(UDPCommunicator.getHexByteString(new byte[] { (byte) 0x00, 0x00, (byte) 0x00 })));
 
 		// set list of error response strings (included at the end of response when command fails, typically ending with command prompt)
@@ -104,7 +104,8 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		populateMonitoringAnControllingProperties(statistics, controls);
 		extendedStatistics.setStatistics(statistics);
 		extendedStatistics.setControllableProperties(controls);
-		return Collections.singletonList(extendedStatistics);
+		localExtendedStatistics = extendedStatistics;
+		return Collections.singletonList(localExtendedStatistics);
 	}
 
 	/**
@@ -190,14 +191,14 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		}
 		// TODO: need uniFYControlPanel to set up the channel (channel name, channel states, ...)
 		for (int i = 1; i <= 64; i++) {
-			String rawChannelInfos = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_CH_INFO + QSCUndnemoConstant.SPACE + i);
+			String rawChannelInfos = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_CH_INFO.getCommand() + QSCUndnemoConstant.SPACE + i);
 			if (rawChannelInfos.contains(QSCUndnemoConstant.ACK)) {
 				String[] channelInfos = parseUDPResponse(rawChannelInfos);
 				String channelIndex = channelInfos[0];
 				String activeChannelIndex = stats.get(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName());
 				String groupName;
 				if (channelIndex.equals(activeChannelIndex)) {
-					groupName = QSCUndnemoConstant.ACTIVE_CHANNEL;
+					groupName = String.format("(00)%s", QSCUndnemoConstant.ACTIVE_CHANNEL);
 				} else {
 					if (i <= 9) {
 						groupName = String.format("(0%s)Channel %s", i, channelIndex);
@@ -247,7 +248,7 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		if (inputString.contains(QSCUndnemoConstant.CH_INFO)) {
 			parseChannelInfo(inputString, splitString[2], resultStrings);
 		} else {
-			splitString[2] = splitString[2].replace(QSCUndnemoConstant.CR, EMPTY);
+			splitString[2] = splitString[2].replace(QSCUndnemoConstant.CR, QSCUndnemoConstant.EMPTY);
 			resultStrings.add(splitString[2]);
 		}
 		return resultStrings.toArray(new String[resultStrings.size()]);
