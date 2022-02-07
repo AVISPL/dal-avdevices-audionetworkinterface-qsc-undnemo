@@ -5,6 +5,10 @@ package com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.util
 
 /**
  * QSCUndnemo Constant class
+ *
+ * @author Duy Nguyen
+ * @version 1.0.0
+ * @since 1.0.0
  */
 public class QSCUndnemoConstant {
 

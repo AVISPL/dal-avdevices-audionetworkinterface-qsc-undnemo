@@ -8,8 +8,13 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 import org.springframework.util.CollectionUtils;
 
@@ -18,7 +23,9 @@ import com.avispl.symphony.api.dal.dto.control.AdvancedControllableProperty;
 import com.avispl.symphony.api.dal.dto.control.ControllableProperty;
 import com.avispl.symphony.api.dal.dto.monitor.ExtendedStatistics;
 import com.avispl.symphony.api.dal.dto.monitor.Statistics;
+import com.avispl.symphony.api.dal.error.ResourceNotReachableException;
 import com.avispl.symphony.api.dal.monitor.Monitorable;
+import com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.dto.ChannelInfo;
 import com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.utils.QSCUndnemoConstant;
 import com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.utils.QSCUndnemoMetric;
 import com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.utils.QSCUndnemoUDPCommand;
@@ -53,6 +60,89 @@ import com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.utils
  */
 public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorable, Controller {
 
+	class QSCDeviceDataLoader implements Runnable {
+		private volatile boolean inProgress;
+
+		private volatile int beginIndex;
+
+		public QSCDeviceDataLoader(int begin) {
+			inProgress = true;
+			beginIndex = begin;
+		}
+
+		@Override
+		public void run() {
+			mainloop:
+			while (inProgress) {
+
+				if (!inProgress) {
+					break mainloop;
+				}
+
+				if (logger.isDebugEnabled()) {
+					logger.debug(String.format("Fetching channel info list from index: %s to %s", beginIndex, beginIndex + 8));
+				}
+				retrieveChannelInfo(beginIndex);
+				if (!inProgress) {
+					break mainloop;
+				}
+
+				int aggregatedDevicesCount = channelInfoList.size();
+
+				if (aggregatedDevicesCount == 0) {
+					continue mainloop;
+				}
+				// TODO: FILTER
+
+				if (logger.isDebugEnabled()) {
+					logger.debug("Finished collecting channel info statistics cycle at " + new Date());
+				}
+				// Finished collecting, stop the thread. It will be called again when getMultipleStatistics is called
+				stop();
+			}
+		}
+
+		/**
+		 * Triggers main loop to stop
+		 */
+		public void stop() {
+			inProgress = false;
+		}
+	}
+
+	/**
+	 * Executor that runs all the async operations, that {@link #deviceDataLoader} is posting
+	 */
+	private static ExecutorService executorService;
+
+	/**
+	 * Runner service responsible for collecting data
+	 */
+	private QSCDeviceDataLoader deviceDataLoader;
+
+	/**
+	 * List of channel info
+	 */
+	private List<ChannelInfo> channelInfoList = Collections.synchronizedList(new ArrayList<>());
+
+	/**
+	 * List error message occur while fetching aggregated devices
+	 */
+	private Set<String> deviceErrorMessagesList = Collections.synchronizedSet(new LinkedHashSet<>());
+
+	/**
+	 * This field is used to prevent fetching unnecessary data when perform {@link QSCUndnemoCommunicator#controlProperty(ControllableProperty)}
+	 */
+	private boolean isActiveChannelControl = false;
+
+	private String lastActiveChannelIndex;
+
+	/**
+	 * This field is used to check if the {@link QSCUndnemoCommunicator#getMultipleStatistics()} -
+	 * is called after {@link QSCUndnemoCommunicator#controlProperty(ControllableProperty)}
+	 */
+	private boolean isGetMultipleStatsAfterControl = false;
+
 	private ExtendedStatistics localExtendedStatistics;
 
 	/**
@@ -73,8 +163,45 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 	 * {@inheritDoc}
 	 */
 	@Override
-	public void controlProperty(ControllableProperty controllableProperty) {
+	protected void internalInit() throws Exception {
+		if (logger.isDebugEnabled()) {
+			logger.debug("Internal init is called.");
+		}
+		executorService = Executors.newFixedThreadPool(8);
+		for (int i = 0; i < 64; i+= 8) {
+			executorService.submit(deviceDataLoader = new QSCDeviceDataLoader(i));
+		}
+		super.internalInit();
+	}
 
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	protected void internalDestroy() {
+		if (logger.isDebugEnabled()) {
+			logger.debug("Internal destroy is called.");
+		}
+
+		if (deviceDataLoader != null) {
+			deviceDataLoader.stop();
+			deviceDataLoader = null;
+		}
+
+		if (executorService != null) {
+			executorService.shutdownNow();
+			executorService = null;
+		}
+		channelInfoList.clear();
+		deviceErrorMessagesList.clear();
+		super.internalDestroy();
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public void controlProperty(ControllableProperty controllableProperty) {
 	}
 
 	/**
@@ -98,6 +225,38 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		if (logger.isDebugEnabled()) {
 			logger.debug(String.format("Perform retrieving statistics at host: %s with port: %s", this.host, this.port));
 		}
+		if (executorService == null) {
+			// Due to the bug that after changing properties on fly - the adapter is destroyed but adapter is not initialized properly,
+			// so executor service is not running. We need to make sure executorService exists
+			executorService = Executors.newFixedThreadPool(8);
+			for (int i = 0; i < 64; i+=8) {
+				executorService.submit(deviceDataLoader = new QSCDeviceDataLoader(i));
+			}
+		}
+		if (!deviceErrorMessagesList.isEmpty()) {
+			synchronized (deviceErrorMessagesList) {
+				String errorMessage = deviceErrorMessagesList.stream().map(Object::toString)
+						.collect(Collectors.joining("\n"));
+				deviceErrorMessagesList.clear();
+				throw new ResourceNotReachableException(errorMessage);
+			}
+		}
+		// Prevent fetching all 64 channels when performing control other properties and vice versa.
+		if (localExtendedStatistics != null && isGetMultipleStatsAfterControl) {
+			Map<String, String> localStatistics = localExtendedStatistics.getStatistics();
+			List<AdvancedControllableProperty> localControls = localExtendedStatistics.getControllableProperties();
+			if (!isActiveChannelControl) {
+				// Update properties that are not relating to channel info
+				populateOtherMonitoringAndControllingProperties(localStatistics, localControls);
+			} else {
+				isGetMultipleStatsAfterControl = false;
+				return Collections.singletonList(localExtendedStatistics);
+			}
+			localExtendedStatistics.setStatistics(localStatistics);
+			localExtendedStatistics.setControllableProperties(localControls);
+			isGetMultipleStatsAfterControl = false;
+			return Collections.singletonList(localExtendedStatistics);
+		}
 		ExtendedStatistics extendedStatistics = new ExtendedStatistics();
 		Map<String, String> statistics = new HashMap<>();
 		List<AdvancedControllableProperty> controls = new ArrayList<>();
@@ -106,6 +265,35 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		extendedStatistics.setControllableProperties(controls);
 		localExtendedStatistics = extendedStatistics;
 		return Collections.singletonList(localExtendedStatistics);
+	}
+
+	/**
+	 * Get list of channel every 30 seconds
+	 * UDP Command: CH_INFO + index of the channel
+	 * Total request every 30 seconds: 64 requests
+	 * Success: populate data for {@link #channelInfoList}
+	 * @param begin begin index
+	 */
+	private void retrieveChannelInfo(int begin) {
+		try {
+			int nextLoop = begin + 8;
+			for (int i = begin + 1; i <= nextLoop; i++) {
+				String rawChannelInfos = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_CH_INFO.getCommand() + QSCUndnemoConstant.SPACE + i);
+				if (rawChannelInfos.contains(QSCUndnemoConstant.ACK)) {
+					String[] channelInfos = parseUDPResponse(rawChannelInfos);
+					String channelIndex = channelInfos[0];
+					String enableState = channelInfos[1];
+					String deviceName = channelInfos[2];
+					String channelName = channelInfos[3];
+					String displayName = channelInfos[4];
+					channelInfoList.add(new ChannelInfo(channelIndex, enableState, deviceName, channelName, displayName));
+				}
+			}
+		} catch (Exception e) {
+			String errorMessage = String.format("Aggregated Device Data Retrieval-Error: %s with cause: %s", e.getMessage(), e.getCause().getMessage());
+			deviceErrorMessagesList.add(errorMessage);
+			logger.error(errorMessage);
+		}
 	}
 
 	/**
@@ -179,41 +367,35 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		if (logger.isDebugEnabled()) {
 			logger.debug("Populating data for channel info and active channel index");
 		}
-		String rawCurrentActiveChannelIndex = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_ACT_CH_IDX.getCommand());
-		if (rawCurrentActiveChannelIndex.contains(QSCUndnemoConstant.ACK)) {
-			String currentActiveChannelIndex = parseUDPResponse(rawCurrentActiveChannelIndex)[0];
-			stats.put(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), currentActiveChannelIndex);
+		// Only populate data to stats if channelInfoList is full of 64 channels data
+		if (channelInfoList.size() == 64) {
+			String rawCurrentActiveChannelIndex = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_ACT_CH_IDX.getCommand());
+			if (rawCurrentActiveChannelIndex.contains(QSCUndnemoConstant.ACK)) {
+				lastActiveChannelIndex = parseUDPResponse(rawCurrentActiveChannelIndex)[0];
+			}
+			stats.put(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), lastActiveChannelIndex);
 			List<String> values = new ArrayList<>();
-			for (int i = 1; i < 65; i++) {
+			for (int i = 1; i <= 64; i++) {
 				values.add(String.valueOf(i));
 			}
-			controls.add(createDropdown(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), values, currentActiveChannelIndex));
-		}
-		// TODO: need uniFYControlPanel to set up the channel (channel name, channel states, ...)
-		for (int i = 1; i <= 64; i++) {
-			String rawChannelInfos = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_CH_INFO.getCommand() + QSCUndnemoConstant.SPACE + i);
-			if (rawChannelInfos.contains(QSCUndnemoConstant.ACK)) {
-				String[] channelInfos = parseUDPResponse(rawChannelInfos);
-				String channelIndex = channelInfos[0];
+			controls.add(createDropdown(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), values, lastActiveChannelIndex));
+			for (ChannelInfo channelInfo : channelInfoList
+			) {
 				String activeChannelIndex = stats.get(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName());
 				String groupName;
-				if (channelIndex.equals(activeChannelIndex)) {
+				if (channelInfo.getChannelIndex().equals(activeChannelIndex)) {
 					groupName = String.format("(00)%s", QSCUndnemoConstant.ACTIVE_CHANNEL);
 				} else {
-					if (i <= 9) {
-						groupName = String.format("(0%s)Channel %s", i, channelIndex);
+					if (Integer.parseInt(channelInfo.getChannelIndex()) <= 9) {
+						groupName = String.format("(0%s)Channel %s", channelInfo.getChannelIndex(), channelInfo.getChannelIndex());
 					} else {
-						groupName = String.format("(%s)Channel %s", i, channelIndex);
+						groupName = String.format("(%s)Channel %s", channelInfo.getChannelIndex(), channelInfo.getChannelIndex());
 					}
 				}
-				String enableState = channelInfos[1];
-				String deviceName = channelInfos[2];
-				String channelName = channelInfos[3];
-				String displayName = channelInfos[4];
-				stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName()), enableState);
-				stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_DEVICE_NAME.getName()), deviceName);
-				stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_CHANNEL_NAME.getName()), channelName);
-				stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_DISPLAY_NAME.getName()), displayName);
+				stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName()), channelInfo.getEnableState());
+				stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_DEVICE_NAME.getName()), channelInfo.getDeviceName());
+				stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_CHANNEL_NAME.getName()), channelInfo.getChannelName());
+				stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_DISPLAY_NAME.getName()), channelInfo.getDisplayName());
 			}
 		}
 	}
