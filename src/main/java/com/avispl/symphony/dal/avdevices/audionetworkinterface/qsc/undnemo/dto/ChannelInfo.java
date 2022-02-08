@@ -12,7 +12,7 @@ package com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.dto;
  */
 public class ChannelInfo {
 
-	private String channelIndex;
+	private String channelInfoIndex;
 
 	private String enableState;
 
@@ -32,7 +32,7 @@ public class ChannelInfo {
 	 * @param displayName display name
 	 */
 	public ChannelInfo(String channelIndex, String enableState, String deviceName, String channelName, String displayName) {
-		this.channelIndex = channelIndex;
+		this.channelInfoIndex = channelIndex;
 		this.enableState = enableState;
 		this.deviceName = deviceName;
 		this.channelName = channelName;
@@ -40,12 +40,12 @@ public class ChannelInfo {
 	}
 
 	/**
-	 * Retrieves {@code {@link #channelIndex}}
+	 * Retrieves {@code {@link #channelInfoIndex}}
 	 *
-	 * @return value of {@link #channelIndex}
+	 * @return value of {@link #channelInfoIndex}
 	 */
-	public String getChannelIndex() {
-		return channelIndex;
+	public String getChannelInfoIndex() {
+		return channelInfoIndex;
 	}
 
 	/**
@@ -53,8 +53,8 @@ public class ChannelInfo {
 	 *
 	 * @param channelIndex the {@code java.lang.String} field
 	 */
-	public void setChannelIndex(String channelIndex) {
-		this.channelIndex = channelIndex;
+	public void setChannelInfoIndex(String channelIndex) {
+		this.channelInfoIndex = channelIndex;
 	}
 
 	/**
@@ -132,7 +132,7 @@ public class ChannelInfo {
 	@Override
 	public String toString() {
 		return "ChannelInfo{" +
-				"channelIndex='" + channelIndex + '\'' +
+				"channelIndex='" + channelInfoIndex + '\'' +
 				", enableState='" + enableState + '\'' +
 				", deviceName='" + deviceName + '\'' +
 				", channelName='" + channelName + '\'' +
