@@ -35,7 +35,9 @@
           </dependency>
         </dependencies>
         <configuration>
-          <groups></groups>
+          <excludes>
+            <exclude>**/QSCUndnemoCommunicatorTest.java</exclude>
+          </excludes>
         </configuration>
       </plugin>
       <plugin>

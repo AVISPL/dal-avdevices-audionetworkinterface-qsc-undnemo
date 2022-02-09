@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.SocketTimeoutException;
 import java.util.List;
 import java.util.concurrent.locks.Lock;
@@ -279,7 +280,11 @@ public class UDPCommunicator extends BaseDevice implements Communicator {
 		try {
 			if (this.datagramSocket == null || this.datagramSocket.isClosed() || !this.datagramSocket.isConnected()) {
 				this.address = InetAddress.getByName(this.host);
-				this.datagramSocket = new DatagramSocket(this.port);
+//				this.datagramSocket = new DatagramSocket(this.port);
+				this.datagramSocket = new DatagramSocket(null);
+				datagramSocket.setReuseAddress(true);
+				datagramSocket.setBroadcast(true);
+				datagramSocket.bind(new InetSocketAddress(this.port));
 				this.datagramSocket.connect(this.address, this.port);
 				this.datagramSocket.setSoTimeout(this.timeout);
 			}

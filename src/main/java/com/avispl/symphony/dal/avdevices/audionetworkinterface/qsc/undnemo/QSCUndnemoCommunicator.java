@@ -16,14 +16,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
-import org.springframework.util.CollectionUtils;
-
 import com.avispl.symphony.api.dal.control.Controller;
 import com.avispl.symphony.api.dal.dto.control.AdvancedControllableProperty;
 import com.avispl.symphony.api.dal.dto.control.ControllableProperty;
 import com.avispl.symphony.api.dal.dto.monitor.ExtendedStatistics;
 import com.avispl.symphony.api.dal.dto.monitor.Statistics;
-import com.avispl.symphony.api.dal.error.CommandFailureException;
 import com.avispl.symphony.api.dal.error.ResourceNotReachableException;
 import com.avispl.symphony.api.dal.monitor.Monitorable;
 import com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.dto.ChannelInfo;
@@ -34,15 +31,6 @@ import com.avispl.symphony.dal.util.StringUtils;
 
 /**
  * QSC Attero Tech unDNEMO Adapter
- *
- * Controlling:
- * <ul>
- * 	<li>Set Active Channel Index (1-64)</li>
- * 	<li>Set Speaker Mute (On/Off)</li>
- * 	<li>Set Volume (1-10)</li>
- * 	<li>Set Button Brightness (0-10)</li>
- * 	<li>Set Display Brightness (0-10)</li>
- * 	</ul
  *
  * Monitoring:
  * <ul>
@@ -56,17 +44,39 @@ import com.avispl.symphony.dal.util.StringUtils;
  * 	<li>Display Brightness (0-10)</li>
  * </ul>
  *
+ * Controlling:
+ * <ul>
+ * 	<li>Set Active Channel Index (1-64)</li>
+ * 	<li>Set Speaker Mute (On/Off)</li>
+ * 	<li>Set Volume (1-10)</li>
+ * 	<li>Set Button Brightness (0-10)</li>
+ * 	<li>Set Display Brightness (0-10)</li>
+ * 	</ul
+ *
  * @author Duy Nguyen
  * @version 1.0
  * @since 1.0
  */
 public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorable, Controller {
 
+	/**
+	 * Process that is running whenever {@link QSCUndnemoCommunicator#getMultipleStatistics()} is called to fetch all 64 channel information.
+	 * - The worker thread will be destroyed when all 64 channels are fetched successfully or {@link QSCUndnemoCommunicator#internalDestroy()} is called.
+	 *
+	 * @author Maksym.Rossiytsev, Duy Nguyen
+	 * @since 1.0.0
+	 */
 	class QSCChannelDataLoader implements Runnable {
+
 		private volatile boolean inProgress;
 
 		private List<Integer> listIndexes;
 
+		/**
+		 * QSCChannelDataLoader with args constructor
+		 *
+		 * @param indexes list of index
+		 */
 		public QSCChannelDataLoader(List<Integer> indexes) {
 			inProgress = true;
 			listIndexes = indexes;
@@ -128,16 +138,14 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 	private boolean isActiveChannelControl = false;
 
 	/**
-	 * Store last active channel index
-	 */
-	private String lastActiveChannelIndex;
-
-	/**
 	 * This field is used to check if the {@link QSCUndnemoCommunicator#getMultipleStatistics()} -
 	 * is called after {@link QSCUndnemoCommunicator#controlProperty(ControllableProperty)}
 	 */
 	private boolean isGetMultipleStatsAfterControl = false;
 
+	/**
+	 * Local extended statistics
+	 */
 	private ExtendedStatistics localExtendedStatistics;
 
 	/**
@@ -169,9 +177,8 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 	public QSCUndnemoCommunicator() {
 		// set buffer length because the response may exceed the default value.
 		this.setBufferLength(100);
-		this.setCommandSuccessList(Collections.singletonList(UDPCommunicator.getHexByteString(new byte[] { (byte) 0x00, 0x00, (byte) 0x00 })));
 
-		// set list of error response strings (included at the end of response when command fails, typically ending with command prompt)
+		this.setCommandSuccessList(Collections.singletonList(UDPCommunicator.getHexByteString(new byte[] { (byte) 0x00, 0x00, (byte) 0x00 })));
 		this.setCommandErrorList(Collections.singletonList(
 				UDPCommunicator.getHexByteString(new byte[] { (byte) 0x00, 0x00, (byte) 0x00 })
 		));
@@ -223,7 +230,7 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 	 * {@inheritDoc}
 	 */
 	@Override
-	public void controlProperties(List<ControllableProperty> list) throws Exception {
+	public void controlProperties(List<ControllableProperty> list) {
 
 	}
 
@@ -267,8 +274,7 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		extendedStatistics.setStatistics(statistics);
 		extendedStatistics.setControllableProperties(controls);
 		localExtendedStatistics = extendedStatistics;
-		// when every thing is finish (stats, controls), we submit 4 threads to start -
-		// fetching the channel info.
+		// Submit 4 threads to start fetching the channel info, each thread is responsible for 16 channels.
 		List<Integer> filterChannelIndexValues = handleListChannelIndex();
 		executorService = Executors.newFixedThreadPool(4);
 		if (filterChannelIndexValues.isEmpty()) {
@@ -303,6 +309,7 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 	 * Success: populate data for {@link #channelInfoList}
 	 *
 	 * @param listIndexes list of indexes
+	 * @throws Exception if fail to get response
 	 */
 	private void retrieveChannelInfo(List<Integer> listIndexes) throws Exception {
 		for (int i = 0; i <= listIndexes.size(); i++) {
@@ -312,11 +319,11 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 				String channelInfoIndex = channelInfos[0];
 				String enableState = channelInfos[1];
 				String deviceName = channelInfos[2];
-				deviceName = deviceName.replace("\"", "");
+				deviceName = deviceName.replace(QSCUndnemoConstant.QUOTE, QSCUndnemoConstant.EMPTY);
 				String channelName = channelInfos[3];
-				channelName = channelName.replace("\"", "");
+				channelName = channelName.replace(QSCUndnemoConstant.QUOTE, QSCUndnemoConstant.EMPTY);
 				String displayName = channelInfos[4];
-				displayName = displayName.replace("\"", "");
+				displayName = displayName.replace(QSCUndnemoConstant.QUOTE, QSCUndnemoConstant.EMPTY);
 				ChannelInfo channelInfo = new ChannelInfo(channelInfoIndex, enableState, deviceName, channelName, displayName);
 				channelInfoList.add(channelInfo);
 			}
@@ -397,15 +404,19 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		// Only populate data to stats if channelInfoList is full of 64 channels data
 		if (channelInfoList.size() == 64 || !handleListChannelIndex().isEmpty()) {
 			String rawCurrentActiveChannelIndex = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_ACT_CH_IDX.getCommand());
-			if (rawCurrentActiveChannelIndex.contains(QSCUndnemoConstant.ACK)) {
-				lastActiveChannelIndex = parseUDPResponse(rawCurrentActiveChannelIndex)[0];
+			if (rawCurrentActiveChannelIndex.contains(QSCUndnemoConstant.NACK)) {
+				if (logger.isDebugEnabled()) {
+					logger.debug("Fail to get active channel index");
+				}
+				return;
 			}
-			stats.put(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), lastActiveChannelIndex);
+			String currentActiveChannelIndex = parseUDPResponse(rawCurrentActiveChannelIndex)[0];
+			stats.put(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), currentActiveChannelIndex);
 			List<String> values = new ArrayList<>();
 			for (int i = 1; i <= 64; i++) {
 				values.add(String.valueOf(i));
 			}
-			controls.add(createDropdown(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), values, lastActiveChannelIndex));
+			controls.add(createDropdown(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), values, currentActiveChannelIndex));
 			synchronized (channelInfoList) {
 				for (ChannelInfo channelInfo : channelInfoList
 				) {
@@ -504,13 +515,13 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 	 * @return list int of channel indexes
 	 */
 	private List<Integer> handleListChannelIndex() {
-		if (!StringUtils.isNullOrEmpty(channelIndex) && !"\"\"".equals(channelIndex)) {
+		if (!StringUtils.isNullOrEmpty(channelIndex) && !QSCUndnemoConstant.DOUBLE_QUOTES.equals(channelIndex)) {
 			try {
 				List<Integer> resultList = new ArrayList<>();
-				String[] listIndex = this.getChannelIndex().split(",");
+				String[] listIndex = this.getChannelIndex().split(QSCUndnemoConstant.COMMA);
 				for (String index : listIndex) {
 					String trimIndex = index.trim();
-					if (trimIndex.matches("-?(0|[1-9]\\d*)")) {
+					if (trimIndex.matches(QSCUndnemoConstant.REGEX_IS_INTEGER)) {
 						resultList.add(Integer.parseInt(trimIndex));
 					}
 				}
@@ -524,6 +535,9 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 
 	/**
 	 * Filter list of channel info based on channel indexes
+	 *
+	 * @param filterChannelIndexValues list of indexes
+	 * @throws Exception when fail to get active channel index
 	 */
 	private void filterChannelInfo(List<Integer> filterChannelIndexValues) throws Exception {
 		if (logger.isDebugEnabled()) {
@@ -592,5 +606,4 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 
 		return new AdvancedControllableProperty(name, new Date(), dropDown, initialValue);
 	}
-
 }

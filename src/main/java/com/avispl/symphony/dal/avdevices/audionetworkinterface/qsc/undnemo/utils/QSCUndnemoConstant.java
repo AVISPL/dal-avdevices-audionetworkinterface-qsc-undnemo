@@ -23,4 +23,7 @@ public class QSCUndnemoConstant {
 	public static final String OPEN_PAREN = "(";
 	public static final String CLOSE_PAREN = ")";
 	public static final String HASH = "#";
+	public static final String REGEX_IS_INTEGER = "-?(0|[1-9]\\d*)";
+	public static final String COMMA = ",";
+	public static final String DOUBLE_QUOTES = "\"\"";
 }
