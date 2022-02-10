@@ -22,6 +22,7 @@ import com.avispl.symphony.dal.communicator.ConnectionStatus;
 
 /**
  * An implementation of UDPCommunicator to provide communication and interaction with AVER PTZ Camera.
+ * Duy Nguyen: Update {@link UDPCommunicator#createChannel()} to prevent case where socket is not actually close.
  *
  * @author Harry
  * @version 1.0
