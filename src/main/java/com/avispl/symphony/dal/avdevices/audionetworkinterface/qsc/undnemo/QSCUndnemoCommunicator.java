@@ -218,6 +218,7 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		}
 		channelInfoList.clear();
 		channelErrorMessagesList.clear();
+		localExtendedStatistics = null;
 		super.internalDestroy();
 	}
 
@@ -236,47 +237,64 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		String response;
 		switch (qscUndnemoMetric) {
 			case ACTIVE_CHANNEL_INDEX:
-				handleActiveChannelControl(value);
+				isActiveChannelControl = true;
+				String rawCurrentActiveChannelIndex = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_ACT_CH_IDX.getCommand());
+				if (rawCurrentActiveChannelIndex.contains(QSCUndnemoConstant.NACK)) {
+					throw new CommandFailureException(this.getAddress(), QSCUndnemoUDPCommand.GET_CMD_ACT_CH_IDX.getCommand(), "Fail to get active channel index");
+				}
+				String currentActiveChannelIndex = parseUDPResponse(rawCurrentActiveChannelIndex)[0];
+				if (value.equals(currentActiveChannelIndex)) {
+					return;
+				}
+				List<Integer> indexList = handleListChannelIndex();
+				if (indexList.isEmpty()) {
+					handleActiveChannelControl(value, currentActiveChannelIndex);
+				} else {
+					handleActiveChannelControlWithFilter(value, indexList, currentActiveChannelIndex);
+				}
 				break;
 			case BUTTON_BRIGHTNESS:
+				isActiveChannelControl = false;
 				float flValue = Float.parseFloat(value);
 				int intValue = Math.round(flValue);
 				response = getUDPResponse(QSCUndnemoUDPCommand.SET_SBB.getCommand() + QSCUndnemoConstant.SPACE + intValue);
 				if (QSCUndnemoConstant.NACK.equals(response)) {
 					throw new CommandFailureException(this.getAddress(), QSCUndnemoUDPCommand.SET_SBB.getCommand(), String.format("Fail to set button brightness with value: %s", value));
 				}
-				isActiveChannelControl = false;
 				break;
 			case DISPLAY_BRIGHTNESS:
+				isActiveChannelControl = false;
 				float flValue1 = Float.parseFloat(value);
 				int intValue1 = Math.round(flValue1);
 				response = getUDPResponse(QSCUndnemoUDPCommand.SET_SDB.getCommand() + QSCUndnemoConstant.SPACE + intValue1);
 				if (QSCUndnemoConstant.NACK.equals(response)) {
 					throw new CommandFailureException(this.getAddress(), QSCUndnemoUDPCommand.SET_SDB.getCommand(), String.format("Fail to set display brightness with value: %s", value));
 				}
-				isActiveChannelControl = false;
 				break;
 			case SPEAKER_MUTE:
+				isActiveChannelControl = false;
 				response = getUDPResponse(QSCUndnemoUDPCommand.SET_SPKR_MUTE.getCommand() + QSCUndnemoConstant.SPACE + value);
 				if (QSCUndnemoConstant.NACK.equals(response)) {
 					throw new CommandFailureException(this.getAddress(), QSCUndnemoUDPCommand.SET_SPKR_MUTE.getCommand(), String.format("Fail to set speaker mute with value: %s", value));
 				}
-				isActiveChannelControl = false;
 				break;
 			case VOLUME:
+				isActiveChannelControl = false;
 				float flValue2 = Float.parseFloat(value);
 				int intValue2 = Math.round(flValue2);
 				response = getUDPResponse(QSCUndnemoUDPCommand.SET_VOLUME.getCommand() + QSCUndnemoConstant.SPACE + intValue2);
 				if (QSCUndnemoConstant.NACK.equals(response)) {
 					throw new CommandFailureException(this.getAddress(), QSCUndnemoUDPCommand.SET_VOLUME.getCommand(), String.format("Fail to set volume with value: %s", value));
 				}
-				isActiveChannelControl = false;
 				break;
 			default:
 				if (logger.isWarnEnabled()) {
 					logger.warn(String.format("Operation %s with value %s is not supported.", property, value));
 				}
 				throw new IllegalArgumentException(String.format("Operation %s with value %s is not supported.", property, value));
+		}
+		if (logger.isDebugEnabled()) {
+			logger.debug("End control operation");
 		}
 	}
 
@@ -317,12 +335,10 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 			if (!isActiveChannelControl) {
 				// Update properties that are not relating to channel info
 				populateOtherMonitoringAndControllingProperties(localStatistics, localControls);
-			} else {
-				isGetMultipleStatsAfterControl = false;
-				return Collections.singletonList(localExtendedStatistics);
+				localExtendedStatistics.setStatistics(localStatistics);
+				localExtendedStatistics.setControllableProperties(localControls);
 			}
-			localExtendedStatistics.setStatistics(localStatistics);
-			localExtendedStatistics.setControllableProperties(localControls);
+			// else condition: data already be handled in handleActiveChannelControl/handleActiveChannelControlWithFilter
 			isGetMultipleStatsAfterControl = false;
 			return Collections.singletonList(localExtendedStatistics);
 		}
@@ -348,24 +364,15 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 	}
 
 	/**
-	 * Handle control active channel index
+	 * Handle control active channel index. This method is used to handle every statistics locally -
+	 * to save the number of requests made to the device.
 	 *
 	 * @param value value of the new index
+	 * @param currentActiveChannelIndex current active channel index
 	 * @throws Exception if fail to get UDP response
 	 */
-	private void handleActiveChannelControl(String value) throws Exception {
-		isActiveChannelControl = true;
-		String rawCurrentActiveChannelIndex = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_ACT_CH_IDX.getCommand());
-		if (rawCurrentActiveChannelIndex.contains(QSCUndnemoConstant.NACK)) {
-			throw new CommandFailureException(this.getAddress(), QSCUndnemoUDPCommand.GET_CMD_ACT_CH_IDX.getCommand(), "Fail to get active channel index");
-		}
-		String currentActiveChannelIndex = parseUDPResponse(rawCurrentActiveChannelIndex)[0];
-		String response;
-		if (value.equals(currentActiveChannelIndex)) {
-			return;
-		}
-
-		response = getUDPResponse(QSCUndnemoUDPCommand.SET_ACT_CH_IDX.getCommand() + QSCUndnemoConstant.SPACE + value);
+	private void handleActiveChannelControl(String value, String currentActiveChannelIndex) throws Exception {
+		String response = getUDPResponse(QSCUndnemoUDPCommand.SET_ACT_CH_IDX.getCommand() + QSCUndnemoConstant.SPACE + value);
 		if (QSCUndnemoConstant.NACK.equals(response)) {
 			throw new CommandFailureException(this.getAddress(), QSCUndnemoUDPCommand.SET_ACT_CH_IDX.getCommand(), String.format("Fail to set active channel index with value: %s", value));
 		}
@@ -373,30 +380,29 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		// This is because we want to prevent unnecessary fetch all 64 channels.
 		Map<String, String> stats = localExtendedStatistics.getStatistics();
 		String newActiveIndexKey = QSCUndnemoConstant.EMPTY;
-		String oldActiveIndexKey;
 		if (Integer.parseInt(value) <= 9) {
-			newActiveIndexKey += String.format("(0%s)Channel %s", value, value);
+			newActiveIndexKey += String.format("Channel 0%s",  value);
 		} else {
-			newActiveIndexKey += String.format("(%s)Channel %s", value, value);
+			newActiveIndexKey += String.format("Channel %s",  value);
 		}
-		oldActiveIndexKey = String.format("(00)%s", QSCUndnemoConstant.ACTIVE_CHANNEL);
-		String oldActiveIndexEnableState = stats.get(oldActiveIndexKey + QSCUndnemoConstant.HASH + QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName());
-		String oldActiveIndexDeviceName = stats.get(oldActiveIndexKey + QSCUndnemoConstant.HASH + QSCUndnemoMetric.CHANNEL_INFO_DEVICE_NAME.getName());
-		String oldActiveIndexChannelName = stats.get(oldActiveIndexKey + QSCUndnemoConstant.HASH + QSCUndnemoMetric.CHANNEL_INFO_CHANNEL_NAME.getName());
-		String oldActiveIndexDisplayName = stats.get(oldActiveIndexKey + QSCUndnemoConstant.HASH + QSCUndnemoMetric.CHANNEL_INFO_DISPLAY_NAME.getName());
+		String oldActiveIndexKey = QSCUndnemoConstant.ACTIVE_CHANNEL;
+		String oldActiveIndexEnableState = stats.get(String.format("%s#%s", oldActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName()));
+		String oldActiveIndexDeviceName = stats.get(String.format("%s#%s", oldActiveIndexKey , QSCUndnemoMetric.CHANNEL_INFO_DEVICE_NAME.getName()));
+		String oldActiveIndexChannelName = stats.get(String.format("%s#%s", oldActiveIndexKey , QSCUndnemoMetric.CHANNEL_INFO_CHANNEL_NAME.getName()));
+		String oldActiveIndexDisplayName = stats.get(String.format("%s#%s",oldActiveIndexKey , QSCUndnemoMetric.CHANNEL_INFO_DISPLAY_NAME.getName()));
 		String oldActiveIndexGroupName;
 		if (Integer.parseInt(currentActiveChannelIndex) <= 9) {
-			oldActiveIndexGroupName = String.format("(0%s)Channel %s", currentActiveChannelIndex, currentActiveChannelIndex);
+			oldActiveIndexGroupName = String.format("Channel 0%s",  currentActiveChannelIndex);
 		} else {
-			oldActiveIndexGroupName = String.format("(%s)Channel %s", currentActiveChannelIndex, currentActiveChannelIndex);
+			oldActiveIndexGroupName = String.format("Channel %s",  currentActiveChannelIndex);
 		}
 
-		String newActiveIndexEnableState = stats.get(newActiveIndexKey + QSCUndnemoConstant.HASH + QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName());
-		String newActiveIndexDeviceName = stats.get(newActiveIndexKey + QSCUndnemoConstant.HASH + QSCUndnemoMetric.CHANNEL_INFO_DEVICE_NAME.getName());
-		String newActiveIndexChannelName = stats.get(newActiveIndexKey + QSCUndnemoConstant.HASH + QSCUndnemoMetric.CHANNEL_INFO_CHANNEL_NAME.getName());
-		String newActiveIndexDisplayName = stats.get(newActiveIndexKey + QSCUndnemoConstant.HASH + QSCUndnemoMetric.CHANNEL_INFO_DISPLAY_NAME.getName());
+		String newActiveIndexEnableState = stats.get(String.format("%s#%s", newActiveIndexKey , QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName()));
+		String newActiveIndexDeviceName = stats.get(String.format("%s#%s", newActiveIndexKey , QSCUndnemoMetric.CHANNEL_INFO_DEVICE_NAME.getName()));
+		String newActiveIndexChannelName = stats.get(String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_CHANNEL_NAME.getName()));
+		String newActiveIndexDisplayName = stats.get(String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_DISPLAY_NAME.getName()));
 
-		String groupName = String.format("(00)%s", QSCUndnemoConstant.ACTIVE_CHANNEL);
+		String groupName =QSCUndnemoConstant.ACTIVE_CHANNEL;
 		// Remove previous non-active group.
 		stats.remove(String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName()));
 		stats.remove(String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_DEVICE_NAME.getName()));
@@ -411,19 +417,60 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 				controllableProperty.setValue(value);
 			}
 		}
+		// Put statistics for ActiveChannel group
 		stats.put(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), value);
 		stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName()), newActiveIndexEnableState);
 		stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_DEVICE_NAME.getName()), newActiveIndexDeviceName);
 		stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_CHANNEL_NAME.getName()), newActiveIndexChannelName);
 		stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_DISPLAY_NAME.getName()), newActiveIndexDisplayName);
 
+		// Put statistics for new Channel group
 		stats.put(String.format("%s#%s", oldActiveIndexGroupName, QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName()), oldActiveIndexEnableState);
 		stats.put(String.format("%s#%s", oldActiveIndexGroupName, QSCUndnemoMetric.CHANNEL_INFO_DEVICE_NAME.getName()), oldActiveIndexDeviceName);
 		stats.put(String.format("%s#%s", oldActiveIndexGroupName, QSCUndnemoMetric.CHANNEL_INFO_CHANNEL_NAME.getName()), oldActiveIndexChannelName);
 		stats.put(String.format("%s#%s", oldActiveIndexGroupName, QSCUndnemoMetric.CHANNEL_INFO_DISPLAY_NAME.getName()), oldActiveIndexDisplayName);
 
 		localExtendedStatistics.setStatistics(stats);
+		localExtendedStatistics.setControllableProperties(controllableProperties);
 	}
+
+	/**
+	 * Handle control active channel index with filter option. This method is used to handle every statistics locally -
+	 * to save the number of requests made to the device.
+	 *
+	 * @param value value of new active channel
+	 * @param indexList list of filter indexes
+	 * @param currentActiveChannelIndex current active channel index
+	 * @throws Exception if fail to get UDP response
+	 */
+	private void handleActiveChannelControlWithFilter(String value, List<Integer> indexList, String currentActiveChannelIndex) throws Exception {
+		String response = getUDPResponse(QSCUndnemoUDPCommand.SET_ACT_CH_IDX.getCommand() + QSCUndnemoConstant.SPACE + value);
+		if (QSCUndnemoConstant.NACK.equals(response)) {
+			throw new CommandFailureException(this.getAddress(), QSCUndnemoUDPCommand.SET_ACT_CH_IDX.getCommand(), String.format("Fail to set active channel index with value: %s", value));
+		}
+		Map<String, String> stats = localExtendedStatistics.getStatistics();
+		List<AdvancedControllableProperty> controls = localExtendedStatistics.getControllableProperties();
+		synchronized (channelInfoList) {
+			for (ChannelInfo channelInfo : channelInfoList) {
+				String channelInfoIndex = channelInfo.getChannelInfoIndex();
+				if (channelInfoIndex.equals(currentActiveChannelIndex) && !indexList.contains(Integer.valueOf(channelInfoIndex))) {
+					channelInfoList.remove(channelInfo);
+					break;
+				}
+			}
+		}
+		if (indexList.contains(Integer.valueOf(value))) {
+			populateChannelInfoMonitoringAndControllingProperties(stats, controls);
+		} else {
+			List<Integer> listOfChannelIndex = new ArrayList<>();
+			listOfChannelIndex.add(Integer.valueOf(value));
+			retrieveChannelInfo(listOfChannelIndex);
+			populateChannelInfoMonitoringAndControllingProperties(stats, controls);
+		}
+		localExtendedStatistics.setStatistics(stats);
+		localExtendedStatistics.setControllableProperties(controls);
+	}
+
 
 	/**
 	 * Prepare list of index before submitting.
@@ -459,8 +506,8 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 	 * @throws Exception if fail to get response
 	 */
 	private void retrieveChannelInfo(List<Integer> listIndexes) throws Exception {
-		for (int i = 0; i <= listIndexes.size(); i++) {
-			String rawChannelInfos = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_CH_INFO.getCommand() + QSCUndnemoConstant.SPACE + listIndexes.get(i));
+		for (Integer listIndex : listIndexes) {
+			String rawChannelInfos = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_CH_INFO.getCommand() + QSCUndnemoConstant.SPACE + listIndex);
 			if (rawChannelInfos.contains(QSCUndnemoConstant.ACK)) {
 				String[] channelInfos = parseUDPResponse(rawChannelInfos);
 				String channelInfoIndex = channelInfos[0];
@@ -549,7 +596,7 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 			logger.debug("Populating data for channel info and active channel index");
 		}
 		// Only populate data to stats if channelInfoList is full of 64 channels data
-		if (channelInfoList.size() == 64 || !handleListChannelIndex().isEmpty()) {
+		if (channelInfoList.size() == 64 || (!handleListChannelIndex().isEmpty() && !channelInfoList.isEmpty())) {
 			String rawCurrentActiveChannelIndex = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_ACT_CH_IDX.getCommand());
 			if (rawCurrentActiveChannelIndex.contains(QSCUndnemoConstant.NACK)) {
 				if (logger.isDebugEnabled()) {
@@ -557,25 +604,24 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 				}
 				return;
 			}
-			String currentActiveChannelIndex = parseUDPResponse(rawCurrentActiveChannelIndex)[0];
-			stats.put(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), currentActiveChannelIndex);
-			List<String> values = new ArrayList<>();
-			for (int i = 1; i <= 64; i++) {
-				values.add(String.valueOf(i));
-			}
-			controls.add(createDropdown(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), values, currentActiveChannelIndex));
 			synchronized (channelInfoList) {
+				String currentActiveChannelIndex = parseUDPResponse(rawCurrentActiveChannelIndex)[0];
+				stats.put(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), currentActiveChannelIndex);
+				List<String> values = new ArrayList<>();
+				for (int i = 1; i <= 64; i++) {
+					values.add(String.valueOf(i));
+				}
+				controls.add(createDropdown(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), values, currentActiveChannelIndex));
 				for (ChannelInfo channelInfo : channelInfoList
 				) {
-					String activeChannelIndex = stats.get(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName());
 					String groupName;
-					if (channelInfo.getChannelInfoIndex().equals(activeChannelIndex)) {
-						groupName = String.format("(00)%s", QSCUndnemoConstant.ACTIVE_CHANNEL);
+					if (channelInfo.getChannelInfoIndex().equals(currentActiveChannelIndex)) {
+						groupName = QSCUndnemoConstant.ACTIVE_CHANNEL;
 					} else {
 						if (Integer.parseInt(channelInfo.getChannelInfoIndex()) <= 9) {
-							groupName = String.format("(0%s)Channel %s", channelInfo.getChannelInfoIndex(), channelInfo.getChannelInfoIndex());
+							groupName = String.format("Channel 0%s", channelInfo.getChannelInfoIndex());
 						} else {
-							groupName = String.format("(%s)Channel %s", channelInfo.getChannelInfoIndex(), channelInfo.getChannelInfoIndex());
+							groupName = String.format("Channel %s",  channelInfo.getChannelInfoIndex());
 						}
 					}
 					stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName()), channelInfo.getEnableState());
@@ -584,10 +630,13 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 					stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_DISPLAY_NAME.getName()), channelInfo.getDisplayName());
 				}
 			}
-			if (logger.isDebugEnabled()) {
-				logger.debug("Clearing channel info list");
+			if (!isGetMultipleStatsAfterControl) {
+				// Only clear when this is in normal getMultipleStatistics() not after controlProperty()
+				if (logger.isDebugEnabled()) {
+					logger.debug("Clearing channel info list");
+				}
+				channelInfoList.clear();
 			}
-			channelInfoList.clear();
 		}
 	}
 

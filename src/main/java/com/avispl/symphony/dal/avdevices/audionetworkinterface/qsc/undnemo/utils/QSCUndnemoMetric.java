@@ -13,7 +13,7 @@ package com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.util
 public enum QSCUndnemoMetric {
 
 	SOFTWARE_VERSION_INFO("SoftwareVersionInfo"),
-	ACTIVE_CHANNEL_INDEX("(00)ActiveChannel#ChannelIndex"),
+	ACTIVE_CHANNEL_INDEX("ActiveChannel#ChannelIndex"),
 	CHANNEL_INFO_ENABLE_STATE("EnableState"),
 	CHANNEL_INFO_DEVICE_NAME("DeviceName"),
 	CHANNEL_INFO_CHANNEL_NAME("ChannelName"),
