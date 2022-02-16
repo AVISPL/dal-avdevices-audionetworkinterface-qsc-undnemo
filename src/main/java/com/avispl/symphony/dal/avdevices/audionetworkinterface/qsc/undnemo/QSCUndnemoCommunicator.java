@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.springframework.util.CollectionUtils;
 
@@ -162,7 +163,7 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 	 */
 	public QSCUndnemoCommunicator() {
 		// set buffer length because the response may exceed the default value.
-		this.setBufferLength(100);
+		this.setBufferLength(200);
 
 		this.setCommandSuccessList(Collections.singletonList(UDPCommunicator.getHexByteString(new byte[] { (byte) 0x00, 0x00, (byte) 0x00 })));
 		this.setCommandErrorList(Collections.singletonList(
@@ -361,10 +362,11 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		// This is because we want to prevent unnecessary fetch all 64 channels.
 		Map<String, String> stats = localExtendedStatistics.getStatistics();
 		String newActiveIndexKey = QSCUndnemoConstant.EMPTY;
-		if (Integer.parseInt(value) <= 9) {
-			newActiveIndexKey += String.format("Channel 0%s", value);
+		int intValue = Integer.parseInt(value);
+		if (intValue >= 1 && intValue <= 9) {
+			newActiveIndexKey += String.format("Channel %02d", intValue);
 		} else {
-			newActiveIndexKey += String.format("Channel %s", value);
+			newActiveIndexKey += String.format("Channel %s", intValue);
 		}
 		String oldActiveIndexKey = QSCUndnemoConstant.ACTIVE_CHANNEL;
 		String oldActiveIndexEnableState = stats.get(String.format("%s#%s", oldActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName()));
@@ -372,23 +374,28 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		String oldActiveIndexChannelName = stats.get(String.format("%s#%s", oldActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_CHANNEL_NAME.getName()));
 		String oldActiveIndexDisplayName = stats.get(String.format("%s#%s", oldActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_DISPLAY_NAME.getName()));
 		String oldActiveIndexGroupName;
-		if (Integer.parseInt(currentActiveChannelIndex) <= 9) {
-			oldActiveIndexGroupName = String.format("Channel 0%s", currentActiveChannelIndex);
+		int intCurrentActiveChannelIndex = Integer.parseInt(currentActiveChannelIndex);
+		if (intCurrentActiveChannelIndex >= 1 && intCurrentActiveChannelIndex <= 9) {
+			oldActiveIndexGroupName = String.format("Channel %02d", intCurrentActiveChannelIndex);
 		} else {
-			oldActiveIndexGroupName = String.format("Channel %s", currentActiveChannelIndex);
+			oldActiveIndexGroupName = String.format("Channel %s", intCurrentActiveChannelIndex);
 		}
+		String newActiveIndexEnableStatKey = String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName());
+		String newActiveIndexDeviceNameKey = String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_DEVICE_NAME.getName());
+		String newActiveIndexChannelNameKey = String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_CHANNEL_NAME.getName());
+		String newActiveIndexDisplayNameKey = String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_DISPLAY_NAME.getName());
 
-		String newActiveIndexEnableState = stats.get(String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName()));
-		String newActiveIndexDeviceName = stats.get(String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_DEVICE_NAME.getName()));
-		String newActiveIndexChannelName = stats.get(String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_CHANNEL_NAME.getName()));
-		String newActiveIndexDisplayName = stats.get(String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_DISPLAY_NAME.getName()));
+		String newActiveIndexEnableState = stats.get(newActiveIndexEnableStatKey);
+		String newActiveIndexDeviceName = stats.get(newActiveIndexDeviceNameKey);
+		String newActiveIndexChannelName = stats.get(newActiveIndexChannelNameKey);
+		String newActiveIndexDisplayName = stats.get(newActiveIndexDisplayNameKey);
 
 		String groupName = QSCUndnemoConstant.ACTIVE_CHANNEL;
 		// Remove previous non-active group.
-		stats.remove(String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName()));
-		stats.remove(String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_DEVICE_NAME.getName()));
-		stats.remove(String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_CHANNEL_NAME.getName()));
-		stats.remove(String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_DISPLAY_NAME.getName()));
+		stats.remove(newActiveIndexEnableStatKey);
+		stats.remove(newActiveIndexDeviceNameKey);
+		stats.remove(newActiveIndexChannelNameKey);
+		stats.remove(newActiveIndexDisplayNameKey);
 
 		// Change initial value of the dropdown to the latest one.
 		List<AdvancedControllableProperty> controllableProperties = localExtendedStatistics.getControllableProperties();
@@ -445,7 +452,11 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		} else {
 			List<Integer> listOfChannelIndex = new ArrayList<>();
 			listOfChannelIndex.add(Integer.valueOf(value));
-			retrieveChannelInfo(listOfChannelIndex);
+			try {
+				retrieveChannelInfo(listOfChannelIndex);
+			} catch (Exception e) {
+				throw new CommandFailureException(this.getAddress(), QSCUndnemoUDPCommand.GET_CMD_CH_INFO.getCommand(), e.getMessage(), e);
+			}
 			populateChannelInfoMonitoringAndControllingProperties(stats, controls);
 		}
 		localExtendedStatistics.setStatistics(stats);
@@ -492,6 +503,9 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 			String rawChannelInfos = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_CH_INFO.getCommand() + QSCUndnemoConstant.SPACE + listIndex);
 			if (rawChannelInfos.contains(QSCUndnemoConstant.ACK)) {
 				String[] channelInfos = parseUDPResponse(rawChannelInfos);
+				if (channelInfos.length != 5) {
+					throw new ResourceNotReachableException(String.format("Fail to get channel info at index: %s", listIndex));
+				}
 				String channelInfoIndex = channelInfos[0];
 				String enableState = channelInfos[1];
 				String deviceName = channelInfos[2];
@@ -589,21 +603,17 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 			synchronized (channelInfoList) {
 				String currentActiveChannelIndex = parseUDPResponse(rawCurrentActiveChannelIndex)[0];
 				stats.put(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), currentActiveChannelIndex);
-				List<String> values = new ArrayList<>();
-				for (int i = 1; i <= 64; i++) {
-					values.add(String.valueOf(i));
-				}
-				controls.add(createDropdown(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), values, currentActiveChannelIndex));
-				for (ChannelInfo channelInfo : channelInfoList
-				) {
+				controls.add(createDropdown(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), currentActiveChannelIndex));
+				for (ChannelInfo channelInfo : channelInfoList) {
 					String groupName;
 					if (channelInfo.getChannelInfoIndex().equals(currentActiveChannelIndex)) {
 						groupName = QSCUndnemoConstant.ACTIVE_CHANNEL;
 					} else {
-						if (Integer.parseInt(channelInfo.getChannelInfoIndex()) <= 9) {
-							groupName = String.format("Channel 0%s", channelInfo.getChannelInfoIndex());
+						int intCurrentChannelInfoIndex = Integer.parseInt(channelInfo.getChannelInfoIndex());
+						if (intCurrentChannelInfoIndex >= 1 && intCurrentChannelInfoIndex <= 9) {
+							groupName = String.format("Channel %02d", intCurrentChannelInfoIndex);
 						} else {
-							groupName = String.format("Channel %s", channelInfo.getChannelInfoIndex());
+							groupName = String.format("Channel %s", intCurrentChannelInfoIndex);
 						}
 					}
 					stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName()), channelInfo.getEnableState());
@@ -774,14 +784,15 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 	 * Create drop-down
 	 *
 	 * @param name String name of the drop-down
-	 * @param values List of values
 	 * @param initialValue String initial value
 	 * @return Instance of AdvancedControllableProperty
 	 */
-	private AdvancedControllableProperty createDropdown(String name, List<String> values, String initialValue) {
+	private AdvancedControllableProperty createDropdown(String name, String initialValue) {
 		AdvancedControllableProperty.DropDown dropDown = new AdvancedControllableProperty.DropDown();
-		dropDown.setOptions(values.toArray(new String[0]));
-		dropDown.setLabels(values.toArray(new String[0]));
+		int[] intArray = IntStream.rangeClosed(1, 64).toArray();
+		String[] values = new String[intArray.length];
+		dropDown.setOptions(values);
+		dropDown.setLabels(values);
 
 		return new AdvancedControllableProperty(name, new Date(), dropDown, initialValue);
 	}
