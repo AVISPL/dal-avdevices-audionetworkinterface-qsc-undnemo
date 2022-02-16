@@ -5,6 +5,7 @@ package com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
@@ -790,7 +791,9 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 	private AdvancedControllableProperty createDropdown(String name, String initialValue) {
 		AdvancedControllableProperty.DropDown dropDown = new AdvancedControllableProperty.DropDown();
 		int[] intArray = IntStream.rangeClosed(1, 64).toArray();
-		String[] values = new String[intArray.length];
+		String[] values = Arrays.stream(intArray)
+				.mapToObj(String::valueOf)
+				.toArray(String[]::new);
 		dropDown.setOptions(values);
 		dropDown.setLabels(values);
 
