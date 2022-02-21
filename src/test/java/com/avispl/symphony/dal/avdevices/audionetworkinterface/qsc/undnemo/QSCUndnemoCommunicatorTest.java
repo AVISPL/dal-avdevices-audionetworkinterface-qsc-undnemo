@@ -5,6 +5,7 @@ package com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo;
 
 import java.util.Map;
 
+import com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.utils.QSCUndnemoMetric;
 import junit.framework.TestCase;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -14,7 +15,6 @@ import org.junit.jupiter.api.Test;
 
 import com.avispl.symphony.api.dal.dto.control.ControllableProperty;
 import com.avispl.symphony.api.dal.dto.monitor.ExtendedStatistics;
-import com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.utils.QSCUndnemoMetric;
 
 /**
  * Unit test for {@link QSCUndnemoCommunicator}.
@@ -63,7 +63,7 @@ class QSCUndnemoCommunicatorTest extends TestCase {
 		Assertions.assertEquals("1", stats.get("ButtonBrightness"));
 		Assertions.assertEquals("1", stats.get("Volume"));
 		Assertions.assertEquals("1", stats.get("SpeakerMute"));
-		Assertions.assertEquals("3", stats.get("ActiveChannel#ChannelIndex"));
+		Assertions.assertEquals("03", stats.get("ActiveChannel#ChannelIndex"));
 		Assertions.assertEquals("MXA910-MillPark1-d", stats.get("Channel 01" + "#" + "DeviceName"));
 		Assertions.assertEquals("1", stats.get("Channel 01" + "#" + "EnableState"));
 		Assertions.assertEquals("Automix Out", stats.get("Channel 01" + "#" + "ChannelName"));
@@ -74,7 +74,7 @@ class QSCUndnemoCommunicatorTest extends TestCase {
 		Assertions.assertEquals("Automix Out", stats.get("Channel 02" + "#" + "ChannelName"));
 		Assertions.assertEquals("Automix Out", stats.get("Channel 02" + "#" + "DisplayName"));
 
-		Assertions.assertEquals("3", stats.get("ActiveChannel" + "#" + "ChannelIndex"));
+		Assertions.assertEquals("03", stats.get("ActiveChannel" + "#" + "ChannelIndex"));
 		Assertions.assertEquals("1", stats.get("ActiveChannel" + "#" + "EnableState"));
 		Assertions.assertEquals("Automix Out", stats.get("ActiveChannel" + "#" + "ChannelName"));
 		Assertions.assertEquals("Automix Out", stats.get("ActiveChannel" + "#" + "DisplayName"));
@@ -105,7 +105,7 @@ class QSCUndnemoCommunicatorTest extends TestCase {
 		Assertions.assertEquals("1", stats.get("ButtonBrightness"));
 		Assertions.assertEquals("1", stats.get("Volume"));
 		Assertions.assertEquals("1", stats.get("SpeakerMute"));
-		Assertions.assertEquals("3", stats.get("ActiveChannel#ChannelIndex"));
+		Assertions.assertEquals("03", stats.get("ActiveChannel#ChannelIndex"));
 
 		Assertions.assertEquals("MXA910-MillPark1-d", stats.get("Channel 01" + "#" + "DeviceName"));
 		Assertions.assertEquals("1", stats.get("Channel 01" + "#" + "EnableState"));
@@ -117,7 +117,7 @@ class QSCUndnemoCommunicatorTest extends TestCase {
 		Assertions.assertEquals("Automix Out", stats.get("Channel 02" + "#" + "ChannelName"));
 		Assertions.assertEquals("Automix Out", stats.get("Channel 02" + "#" + "DisplayName"));
 
-		Assertions.assertEquals("3", stats.get("ActiveChannel" + "#" + "ChannelIndex"));
+		Assertions.assertEquals("03", stats.get("ActiveChannel" + "#" + "ChannelIndex"));
 		Assertions.assertEquals("1", stats.get("ActiveChannel" + "#" + "EnableState"));
 		Assertions.assertEquals("Automix Out", stats.get("ActiveChannel" + "#" + "ChannelName"));
 		Assertions.assertEquals("Automix Out", stats.get("ActiveChannel" + "#" + "DisplayName"));
@@ -143,7 +143,7 @@ class QSCUndnemoCommunicatorTest extends TestCase {
 		Assertions.assertEquals("1", stats.get("ButtonBrightness"));
 		Assertions.assertEquals("1", stats.get("Volume"));
 		Assertions.assertEquals("1", stats.get("SpeakerMute"));
-		Assertions.assertEquals("3", stats.get("ActiveChannel#ChannelIndex"));
+		Assertions.assertEquals("03", stats.get("ActiveChannel#ChannelIndex"));
 		Assertions.assertEquals("MXA910-MillPark1-d", stats.get("Channel 01" + "#" + "DeviceName"));
 		Assertions.assertEquals("1", stats.get("Channel 01" + "#" + "EnableState"));
 		Assertions.assertEquals("Automix Out", stats.get("Channel 01" + "#" + "ChannelName"));
@@ -154,7 +154,7 @@ class QSCUndnemoCommunicatorTest extends TestCase {
 		Assertions.assertEquals("Automix Out", stats.get("Channel 02" + "#" + "ChannelName"));
 		Assertions.assertEquals("Automix Out", stats.get("Channel 02" + "#" + "DisplayName"));
 
-		Assertions.assertEquals("3", stats.get("ActiveChannel" + "#" + "ChannelIndex"));
+		Assertions.assertEquals("03", stats.get("ActiveChannel" + "#" + "ChannelIndex"));
 		Assertions.assertEquals("1", stats.get("ActiveChannel" + "#" + "EnableState"));
 		Assertions.assertEquals("Automix Out", stats.get("ActiveChannel" + "#" + "ChannelName"));
 		Assertions.assertEquals("Automix Out", stats.get("ActiveChannel" + "#" + "DisplayName"));
@@ -251,14 +251,14 @@ class QSCUndnemoCommunicatorTest extends TestCase {
 		qscUndnemoCommunicator.getMultipleStatistics();
 		// Sleep here to wait for worker thread to fetch channel info
 		Thread.sleep(30000);
-		qscUndnemoCommunicator.getMultipleStatistics();
+		ExtendedStatistics extendedStatistics1 = (ExtendedStatistics) qscUndnemoCommunicator.getMultipleStatistics().get(0);
 		ControllableProperty property = new ControllableProperty();
-		property.setValue(3);
+		property.setValue(03);
 		property.setProperty(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName());
 		qscUndnemoCommunicator.controlProperty(property);
 		ExtendedStatistics extendedStatistics = (ExtendedStatistics) qscUndnemoCommunicator.getMultipleStatistics().get(0);
 		Map<String, String> stats = extendedStatistics.getStatistics();
-		Assertions.assertEquals("3", stats.get("ActiveChannel#ChannelIndex"));
+		Assertions.assertEquals("03", stats.get("ActiveChannel#ChannelIndex"));
 	}
 
 	/**
@@ -274,14 +274,14 @@ class QSCUndnemoCommunicatorTest extends TestCase {
 		Thread.sleep(30000);
 		qscUndnemoCommunicator.getMultipleStatistics();
 		ControllableProperty property = new ControllableProperty();
-		property.setValue(4);
+		property.setValue(04);
 		property.setProperty(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName());
 		qscUndnemoCommunicator.controlProperty(property);
 		ExtendedStatistics extendedStatistics = (ExtendedStatistics) qscUndnemoCommunicator.getMultipleStatistics().get(0);
 		Map<String, String> stats = extendedStatistics.getStatistics();
-		Assertions.assertEquals("4", stats.get("ActiveChannel#ChannelIndex"));
+		Assertions.assertEquals("04", stats.get("ActiveChannel#ChannelIndex"));
 		// Set it back to 3, so that it won't conflict other tests.
-		property.setValue(3);
+		property.setValue(03);
 		property.setProperty(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName());
 		qscUndnemoCommunicator.controlProperty(property);
 	}
@@ -300,14 +300,14 @@ class QSCUndnemoCommunicatorTest extends TestCase {
 		Thread.sleep(30000);
 		qscUndnemoCommunicator.getMultipleStatistics();
 		ControllableProperty property = new ControllableProperty();
-		property.setValue(2);
+		property.setValue(02);
 		property.setProperty(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName());
 		qscUndnemoCommunicator.controlProperty(property);
 		ExtendedStatistics extendedStatistics = (ExtendedStatistics) qscUndnemoCommunicator.getMultipleStatistics().get(0);
 		Map<String, String> stats = extendedStatistics.getStatistics();
-		Assertions.assertEquals("2", stats.get("ActiveChannel#ChannelIndex"));
+		Assertions.assertEquals("02", stats.get("ActiveChannel#ChannelIndex"));
 		// Set it back to 3, so that it won't conflict other tests.
-		property.setValue(3);
+		property.setValue(03);
 		property.setProperty(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName());
 		qscUndnemoCommunicator.controlProperty(property);
 	}
