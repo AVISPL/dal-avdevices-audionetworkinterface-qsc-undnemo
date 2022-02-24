@@ -4,6 +4,7 @@
 package com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo;
 
 import java.nio.charset.StandardCharsets;
+import java.time.temporal.ValueRange;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -17,6 +18,7 @@ import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.dto.ChannelInfo;
 import com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.utils.QSCUndnemoConstant;
 import com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.utils.QSCUndnemoMetric;
 import com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.utils.QSCUndnemoUDPCommand;
@@ -31,12 +33,11 @@ import com.avispl.symphony.api.dal.dto.monitor.Statistics;
 import com.avispl.symphony.api.dal.error.CommandFailureException;
 import com.avispl.symphony.api.dal.error.ResourceNotReachableException;
 import com.avispl.symphony.api.dal.monitor.Monitorable;
-import com.avispl.symphony.dal.avdevices.audionetworkinterface.qsc.undnemo.dto.ChannelInfo;
 import com.avispl.symphony.dal.util.StringUtils;
 
 /**
  * QSC Attero Tech unDNEMO Adapter
- *
+ * <p>
  * Monitoring:
  * <ul>
  * 	<li>Online / Offline Status</li>
@@ -48,7 +49,7 @@ import com.avispl.symphony.dal.util.StringUtils;
  * 	<li>Button Brightness (0-10)</li>
  * 	<li>Display Brightness (0-10)</li>
  * </ul>
- *
+ * <p>
  * Controlling:
  * <ul>
  * 	<li>Set Active Channel Index (1-64)</li>
@@ -221,17 +222,21 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		switch (qscUndnemoMetric) {
 			case ACTIVE_CHANNEL_INDEX:
 				isActiveChannelControl = true;
-				String rawCurrentActiveChannelIndex = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_ACT_CH_IDX.getCommand());
-				if (rawCurrentActiveChannelIndex.contains(QSCUndnemoConstant.NACK)) {
-					throw new CommandFailureException(this.getAddress(), QSCUndnemoUDPCommand.GET_CMD_ACT_CH_IDX.getCommand(), "Fail to get active channel index");
+				if (value.equals(QSCUndnemoConstant.NONE)) {
+					return;
 				}
-				String currentActiveChannelIndex = parseUDPResponse(rawCurrentActiveChannelIndex)[0];
+				String rawCurrentActiveChannelIndex = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_ACT_CH_IDX.getCommand());
+				String currentActiveChannelIndex = getValidActiveChannelIndex(rawCurrentActiveChannelIndex);
 				if (value.equals(currentActiveChannelIndex)) {
 					return;
 				}
 				List<Integer> indexList = handleListChannelIndex();
 				if (indexList.isEmpty()) {
-					handleActiveChannelControl(value, currentActiveChannelIndex);
+					if (currentActiveChannelIndex.equals("0")) {
+						handleActiveChannelControlWithNoneCurrentIndex(value);
+					} else {
+						handleActiveChannelControl(value, currentActiveChannelIndex);
+					}
 				} else {
 					handleActiveChannelControlWithFilter(value, indexList);
 				}
@@ -389,15 +394,16 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		stats.remove(newActiveIndexChannelNameKey);
 		stats.remove(newActiveIndexDisplayNameKey);
 
-		// Change initial value of the dropdown to the latest one.
 		String formattedValue = String.format("%02d", intValue);
 		List<AdvancedControllableProperty> controllableProperties = localExtendedStatistics.getControllableProperties();
-		for (AdvancedControllableProperty controllableProperty : controllableProperties
-		) {
-			if (controllableProperty.getName().equals(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName())) {
-				controllableProperty.setValue(formattedValue);
-			}
+		// Update dropdown list without None value
+		controllableProperties.removeIf(control -> control.getName().equals(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName()));
+		List<String> values = new ArrayList<>();
+		int[] intArray = IntStream.rangeClosed(1, 64).toArray();
+		for (int j : intArray) {
+			values.add(String.format("%02d", j));
 		}
+		controllableProperties.add(createDropdown(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), values, formattedValue));
 		// Put statistics for ActiveChannel group
 		stats.put(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), formattedValue);
 		stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName()), newActiveIndexEnableState);
@@ -413,6 +419,60 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 
 		localExtendedStatistics.setStatistics(stats);
 		localExtendedStatistics.setControllableProperties(controllableProperties);
+	}
+
+	/**
+	 * Handle control active channel index when currentActiveChannelIndex = 0. In this case, ActiveChannel group only -
+	 * contains a dropdown list with default value = None.
+	 * to save the number of requests made to the device.
+	 *
+	 * @param value value of the new index
+	 * @throws Exception if fail to get UDP response
+	 */
+	private void handleActiveChannelControlWithNoneCurrentIndex(String value) throws Exception {
+		int intValue = Integer.parseInt(value);
+		String response = getUDPResponse(QSCUndnemoUDPCommand.SET_ACT_CH_IDX.getCommand() + QSCUndnemoConstant.SPACE + intValue);
+		if (QSCUndnemoConstant.NACK.equals(response)) {
+			throw new CommandFailureException(this.getAddress(), QSCUndnemoUDPCommand.SET_ACT_CH_IDX.getCommand(), String.format("Fail to set active channel index with value: %s", value));
+		}
+		Map<String, String> stats = localExtendedStatistics.getStatistics();
+		List<AdvancedControllableProperty> controls = localExtendedStatistics.getControllableProperties();
+		String formattedValue = String.format("%02d", intValue);
+		// Update dropdown list without None value
+		controls.removeIf(control -> control.getName().equals(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName()));
+		List<String> values = new ArrayList<>();
+		int[] intArray = IntStream.rangeClosed(1, 64).toArray();
+		for (int j : intArray) {
+			values.add(String.format("%02d", j));
+		}
+		controls.add(createDropdown(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), values, formattedValue));
+		// Switch places between ActiveChannel and Channel group.
+		String newActiveIndexKey = String.format("Channel %02d", intValue);
+		String newActiveIndexEnableStatKey = String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName());
+		String newActiveIndexDeviceNameKey = String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_DEVICE_NAME.getName());
+		String newActiveIndexChannelNameKey = String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_CHANNEL_NAME.getName());
+		String newActiveIndexDisplayNameKey = String.format("%s#%s", newActiveIndexKey, QSCUndnemoMetric.CHANNEL_INFO_DISPLAY_NAME.getName());
+
+		String newActiveIndexEnableState = stats.get(newActiveIndexEnableStatKey);
+		String newActiveIndexDeviceName = stats.get(newActiveIndexDeviceNameKey);
+		String newActiveIndexChannelName = stats.get(newActiveIndexChannelNameKey);
+		String newActiveIndexDisplayName = stats.get(newActiveIndexDisplayNameKey);
+
+		// Remove previous non-active group.
+		stats.remove(newActiveIndexEnableStatKey);
+		stats.remove(newActiveIndexDeviceNameKey);
+		stats.remove(newActiveIndexChannelNameKey);
+		stats.remove(newActiveIndexDisplayNameKey);
+
+		String groupName = QSCUndnemoConstant.ACTIVE_CHANNEL;
+		stats.put(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), formattedValue);
+		stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_ENABLE_STATE.getName()), newActiveIndexEnableState);
+		stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_DEVICE_NAME.getName()), newActiveIndexDeviceName);
+		stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_CHANNEL_NAME.getName()), newActiveIndexChannelName);
+		stats.put(String.format("%s#%s", groupName, QSCUndnemoMetric.CHANNEL_INFO_DISPLAY_NAME.getName()), newActiveIndexDisplayName);
+
+		localExtendedStatistics.setStatistics(stats);
+		localExtendedStatistics.setControllableProperties(controls);
 	}
 
 	/**
@@ -451,6 +511,8 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 				throw new CommandFailureException(this.getAddress(), QSCUndnemoUDPCommand.GET_CMD_CH_INFO.getCommand(), e.getMessage(), e);
 			}
 		}
+		// Remove old dropdown list.
+		controls.removeIf(control -> control.getName().equals(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName()));
 		populateChannelInfoMonitoringAndControllingProperties(stats, controls);
 		localExtendedStatistics.setStatistics(stats);
 		localExtendedStatistics.setControllableProperties(controls);
@@ -588,23 +650,22 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		// Only populate data to stats if channelInfoList is full of 64 channels data
 		if (channelInfoList.size() == 64 || (!filterChannelIndexValues.isEmpty() && !channelInfoList.isEmpty())) {
 			String rawCurrentActiveChannelIndex = getUDPResponse(QSCUndnemoUDPCommand.GET_CMD_ACT_CH_IDX.getCommand());
-			if (rawCurrentActiveChannelIndex.contains(QSCUndnemoConstant.NACK)) {
-				if (logger.isDebugEnabled()) {
-					logger.debug("Fail to get active channel index");
-				}
-				return;
-			}
-			String currentActiveChannelIndex = parseUDPResponse(rawCurrentActiveChannelIndex)[0];
-			String formattedCurrentActiveChannelIndex = String.format("%02d", Integer.parseInt(currentActiveChannelIndex));
+			String currentActiveChannelIndex = getValidActiveChannelIndex(rawCurrentActiveChannelIndex);
 			int activeChannelIndex = Integer.parseInt(currentActiveChannelIndex);
+			String formattedCurrentActiveChannelIndex;
+			if (activeChannelIndex == 0) {
+				formattedCurrentActiveChannelIndex = QSCUndnemoConstant.NONE;
+			} else {
+				formattedCurrentActiveChannelIndex = String.format("%02d", activeChannelIndex);
+			}
 			// This block of codes are used to check whether active channel information is in channelInfoList when filter channel index contains validate data.
 			// When it is on normal behaviour (fetch all 64 channels) without filtering this block of code won't be applied.
 			if (!filterChannelIndexValues.isEmpty() && !channelInfoList.isEmpty()) {
 				// Make sure active channel information always in the channelInfoList. If there isn't active channel information, we only call -
 				// 1 request. So this won't slow getMultipleStatistics() down.
-				if (!filterChannelIndexValues.contains(activeChannelIndex)) {
+				if (!filterChannelIndexValues.contains(activeChannelIndex) && activeChannelIndex != 0) {
 					List<Integer> activeChannelInformation = new ArrayList<>();
-					activeChannelInformation.add(Integer.valueOf(currentActiveChannelIndex));
+					activeChannelInformation.add(activeChannelIndex);
 					try {
 						retrieveChannelInfo(activeChannelInformation);
 					} catch (Exception e) {
@@ -613,7 +674,7 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 				}
 				List<ChannelInfo> channelInfoListToBeRemoved = new ArrayList<>();
 				synchronized (channelInfoList) {
-					for (ChannelInfo channelInfo: channelInfoList) {
+					for (ChannelInfo channelInfo : channelInfoList) {
 						// Remove unnecessary ChannelInfo in channelInfoList
 						int currentIndex = Integer.parseInt(channelInfo.getChannelInfoIndex());
 						if (!filterChannelIndexValues.contains(currentIndex) && currentIndex != activeChannelIndex) {
@@ -627,7 +688,24 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 			}
 			synchronized (channelInfoList) {
 				stats.put(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), formattedCurrentActiveChannelIndex);
-				controls.add(createDropdown(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), formattedCurrentActiveChannelIndex));
+				List<String> values = new ArrayList<>();
+				if (activeChannelIndex == 0) {
+					values.add(QSCUndnemoConstant.NONE);
+				}
+				if (filterChannelIndexValues.isEmpty()) {
+					int[] intArray = IntStream.rangeClosed(1, 64).toArray();
+					for (int j : intArray) {
+						values.add(String.format("%02d", j));
+					}
+				} else {
+					for (Integer filterChannelIndexValue : filterChannelIndexValues) {
+						values.add(String.format("%02d", filterChannelIndexValue));
+					}
+					if (!filterChannelIndexValues.contains(activeChannelIndex) && activeChannelIndex != 0) {
+						values.add(formattedCurrentActiveChannelIndex);
+					}
+				}
+				controls.add(createDropdown(QSCUndnemoMetric.ACTIVE_CHANNEL_INDEX.getName(), values, formattedCurrentActiveChannelIndex));
 				for (ChannelInfo channelInfo : channelInfoList) {
 					String groupName;
 					if (channelInfo.getChannelInfoIndex().equals(currentActiveChannelIndex)) {
@@ -650,6 +728,29 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 				channelInfoList.clear();
 			}
 		}
+	}
+
+	/**
+	 * Get valid active channel index
+	 *
+	 * @param rawCurrentActiveChannelIndex raw response from the UDP command
+	 * @return valid active channel index
+	 */
+	private String getValidActiveChannelIndex(String rawCurrentActiveChannelIndex) {
+		String currentActiveChannelIndex;
+		if (rawCurrentActiveChannelIndex.contains(QSCUndnemoConstant.NACK)) {
+			currentActiveChannelIndex = "0";
+		} else {
+			currentActiveChannelIndex = parseUDPResponse(rawCurrentActiveChannelIndex)[0];
+			// In case of the response contains ACK but don't have the required value.
+			if (currentActiveChannelIndex.equals(QSCUndnemoConstant.NACK) || !currentActiveChannelIndex.matches(QSCUndnemoConstant.REGEX_IS_INTEGER)) {
+				currentActiveChannelIndex = "0";
+			}
+			if (currentActiveChannelIndex.matches(QSCUndnemoConstant.REGEX_IS_INTEGER) && !ValueRange.of(1, 64).isValidIntValue(Integer.parseInt(currentActiveChannelIndex))) {
+				currentActiveChannelIndex = "0";
+			}
+		}
+		return currentActiveChannelIndex;
 	}
 
 	/**
@@ -682,8 +783,13 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 		if (inputString.contains(QSCUndnemoConstant.CH_INFO)) {
 			parseChannelInfo(inputString, splitString[2], resultStrings);
 		} else {
-			splitString[2] = splitString[2].replace(QSCUndnemoConstant.CR, QSCUndnemoConstant.EMPTY);
-			resultStrings.add(splitString[2]);
+			// The response always contains 3 fields like: ACK CH_INFO 3
+			if (splitString.length == 3) {
+				splitString[2] = splitString[2].replace(QSCUndnemoConstant.CR, QSCUndnemoConstant.EMPTY);
+				resultStrings.add(splitString[2]);
+			} else {
+				resultStrings.add(QSCUndnemoConstant.NACK);
+			}
 		}
 		return resultStrings.toArray(new String[resultStrings.size()]);
 	}
@@ -802,18 +908,14 @@ public class QSCUndnemoCommunicator extends UDPCommunicator implements Monitorab
 	 * Create drop-down
 	 *
 	 * @param name String name of the drop-down
+	 * @param values list of values
 	 * @param initialValue String initial value
 	 * @return Instance of AdvancedControllableProperty
 	 */
-	private AdvancedControllableProperty createDropdown(String name, String initialValue) {
+	private AdvancedControllableProperty createDropdown(String name, List<String> values, String initialValue) {
 		AdvancedControllableProperty.DropDown dropDown = new AdvancedControllableProperty.DropDown();
-		int[] intArray = IntStream.rangeClosed(1, 64).toArray();
-		String[] values = new String[intArray.length];
-		for (int i = 0; i < intArray.length; i++) {
-			values[i] = String.format("%02d", intArray[i]);
-		}
-		dropDown.setOptions(values);
-		dropDown.setLabels(values);
+		dropDown.setOptions(values.toArray(new String[0]));
+		dropDown.setLabels(values.toArray(new String[0]));
 		return new AdvancedControllableProperty(name, new Date(), dropDown, initialValue);
 	}
 }
